@@ -330,7 +330,7 @@ class TFE_Dialog(c4d.gui.GeDialog):
                 self.game.move(self.game.MOVE_UP)
             elif channel == c4d.KEY_DOWN:
                 self.game.move(self.game.MOVE_DOWN)
-            elif channel == c4d.KEY_ESC:
+            elif channel == c4d.KEY_BACKSPACE:
                 self.game.reset()
             else:
                 handled = False
