@@ -6,3 +6,7 @@ development. Use the arrow keys to control the game, press backspace to
 reset it.
 
 ![](preview.png)
+
+## Todo
+
+- Animated tile movement would be nice
