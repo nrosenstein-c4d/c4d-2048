@@ -52,30 +52,32 @@ def traverse_grid(start_index, direction, steps):
 
 def merge(values):
     """
-    merge(values) -> list
+    merge(values) -> (list, integer)
 
-    Implementation of an algorithm to merge a sequence of values
-    in 2048-style. Returns a list of the new values.
+    Implementation of an algorithm to merge a sequence of values in
+    2048-style. Returns a list of the merged values and the score that
+    was achieved by the merge.
     """
 
     # Since values could be a generator, we'll count the elements
     # it yielded.
     count = 0
-    result = []
+    score = 0
+    new_values = []
 
     for value in values:
         count += 1
 
         # Check if we can merge this value with the last one.
-        if result and result[-1] == value and result[-1] < 2048:
-            result[-1] += value
+        if new_values and new_values[-1] == value:
+            score += value * 2
+            new_values[-1] += value
         elif value != 0:
-            result.append(value)
+            new_values.append(value)
 
     # Zero-fill the result.
-    result.extend(0 for __ in xrange(count - len(result)))
-
-    return result
+    new_values.extend(0 for __ in xrange(count - len(new_values)))
+    return (new_values, score)
 
 
 class TwentyFortyEight(object):
@@ -123,6 +125,7 @@ class TwentyFortyEight(object):
 
         # The grid is created in column-first order.
         self.grid = [[0] * self.width for __ in xrange(self.height)]
+        self.score = 0
         self.new_tile(count=2)
 
     def new_tile(self, count=1):
@@ -169,11 +172,15 @@ class TwentyFortyEight(object):
         """
         move(move) -> bool
 
-        Performs a move on the game grid. *move* must be one of the
-        constants :data:`MOVE_UP`, :data:`MOVE_DOWN`, :data:`MOVE_LEFT`
-        or :data:`MOVE_RIGHT`.
+        Performs a move on the game grid, updates the score and creates
+        a new tile at a random location.
 
-        Returns True if the move resulted in a 2048 being created.
+        :param move: Must be one of the following values:
+
+            - :data:`MOVE_UP`
+            - :data:`MOVE_DOWN`
+            - :data:`MOVE_LEFT`
+            - :data:`MOVE_RIGHT`
         """
 
         has_2048 = False
@@ -188,16 +195,16 @@ class TwentyFortyEight(object):
             values = (self.grid[column][row] for (column, row) in indices)
 
             # Merge the values in 2048-style (it supports generators :-).
-            values = merge(values)
+            result = merge(values)
 
-            # And set them back on the grid.
-            for (column, row), value in zip(indices, values):
+            # Update the score and set the merged values back in the grid.
+            self.score += result[1]
+            for (column, row), value in zip(indices, result[0]):
                 if value == 2048:
                     has_2048 = True
                 self.grid[column][row] = value
 
         self.new_tile()
-        return has_2048
 
 
 class TFE_View(c4d.gui.GeUserArea):
@@ -307,6 +314,11 @@ class TFE_Dialog(c4d.gui.GeDialog):
     it in its very own window.
     """
 
+    # Symbolic IDs for parameters in the dialog.
+    ID_SCORE = 1000
+    ID_TFEVIEW = 1001
+
+
     def __init__(self):
         super(TFE_Dialog, self).__init__()
         self.game = TwentyFortyEight(4, 4)
@@ -335,15 +347,37 @@ class TFE_Dialog(c4d.gui.GeDialog):
             else:
                 handled = False
 
-            self.view.Redraw()
+            if handled:
+                self.sync_gui()
             return handled
 
         return False
 
+    def sync_gui(self):
+        """
+        We call this method to synchronize the game state with all
+        data that is displayed on the UI. Currently, this will just
+        redraw the TFE_View and update the score.
+        """
+
+        self.SetString(self.ID_SCORE, "Score: {0}".format(self.game.score))
+        self.LayoutChanged(self.ID_SCORE)
+        self.view.Redraw()
+
     def CreateLayout(self):
         self.SetTitle("2048")
-        self.AddUserArea(1000, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT)
-        self.AttachUserArea(self.view, 1000)
+
+        # Add the field to display the score in the menu line of
+        # the dialog.
+        self.GroupBeginInMenuLine()
+        self.AddStaticText(self.ID_SCORE, 0)
+        self.GroupEnd()
+
+        # Add and attach the TFE_View to the main dialog area.
+        self.AddUserArea(self.ID_TFEVIEW, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT)
+        self.AttachUserArea(self.view, self.ID_TFEVIEW)
+
+        self.sync_gui()
         return True
 
     def Message(self, msg, result):

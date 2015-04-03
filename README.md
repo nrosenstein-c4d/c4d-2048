@@ -9,5 +9,4 @@ reset it.
 
 ## Todo
 
-- Display score
 - Animated tile movement would be nice
