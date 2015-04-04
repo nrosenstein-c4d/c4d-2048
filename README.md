@@ -1,12 +1,13 @@
 # 2048
 
-This Cinema 4D plugin brings you 2048 to Cinema 4D. It is well documented
-and a good learning resource for Python beginners in the field of GUI
-development. Use the arrow keys to control the game, press backspace to
-reset it.
+This Cinema 4D plugin brings you 2048 to Cinema 4D. The source code is
+well documented and should be a good learning resource for intermediate
+level Python programmers interested in advanced GUI development.
 
-![](preview.png)
+- 99% handmade user interface
+- animated tiles
 
-## Todo
+Use the arrow keys to control the game, press backspace to reset it.
 
-- Animated tile movement would be nice
+![Preview Image of the 2048 game for Cinema 4D](preview.png)
+

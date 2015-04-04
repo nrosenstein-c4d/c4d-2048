@@ -28,8 +28,11 @@ __author__ = 'Niklas Rosenstein <rosensteinniklas(at)gmail.com>'
 __version__ = '1.0'
 
 import c4d
+import copy
+import collections
 import math
 import random
+import time
 
 PLUGIN_ID = 1035109
 
@@ -50,34 +53,122 @@ def traverse_grid(start_index, direction, steps):
         yield (x, y)
 
 
-def merge(values):
+Coord = collections.namedtuple('Coord', 'x y')
+
+
+class Tile(object):
     """
-    merge(values) -> (list, integer)
+    This class represents a tile in the TwentyFortyEight game.
 
-    Implementation of an algorithm to merge a sequence of values in
-    2048-style. Returns a list of the merged values and the score that
-    was achieved by the merge.
+    .. attribute:: coord
+
+        The coordinate of the tile in the grid.
+
+    .. attribute:: value
+
+        The value of the tile. Zero indicates an empty tile.
+
+    .. attribute:: prev_value
+
+        The previous value of the tile.
+
+    .. attribute:: merged_from
+
+        A list of the coordinates the tiles value originates from.
+        The list can be empty and contain up to two elements.
     """
 
-    # Since values could be a generator, we'll count the elements
-    # it yielded.
-    count = 0
-    score = 0
-    new_values = []
+    __slots__ = ('coord', 'value', 'prev_value', 'merged_from', 'age')
 
-    for value in values:
-        count += 1
+    def __init__(self, col, row, value=0):
+        super(Tile, self).__init__()
+        self.coord = Coord(col, row)
+        self.value = value
+        self.merged_from = []
+        self.age = 0
 
-        # Check if we can merge this value with the last one.
-        if new_values and new_values[-1] == value:
-            score += value * 2
-            new_values[-1] += value
-        elif value != 0:
-            new_values.append(value)
+    def __repr__(self):
+        return str(self.value)
 
-    # Zero-fill the result.
-    new_values.extend(0 for __ in xrange(count - len(new_values)))
-    return (new_values, score)
+    def clear(self):
+        """
+        Empties the tile.
+        """
+
+        self.age = 0
+        self.value = 0
+        self.merged_from = []
+
+    def is_merged(self):
+        """
+        is_merged() -> bool
+
+        Returns True if this is a merged tile, False if not. A merged
+        tile has exactly two elements in its :attr:`merged_from` list.
+        """
+
+        assert len(self.merged_from) <= 2
+        return len(self.merged_from) == 2
+
+    @staticmethod
+    def merge_tiles(tiles):
+        """
+        merge_tiles(tiles) -> integer
+
+        Merges all :class:`Tile`s in the list *tiles*. The actual Tile
+        objects stay at the same position in the grid, only their
+        attributes will be adjusted.
+
+        Returns the score achieved by the merge.
+        """
+
+        score = 0
+        last_index = 0
+
+        for index, curr in enumerate(tiles):
+            del curr.merged_from[:]
+            curr.age += 1
+            if index == 0:
+                continue
+
+            target = tiles[last_index]
+
+            # Check if we can merge this tile into its predecesor.
+            if curr.value != 0 and target.value == curr.value:
+                score += curr.value * 2
+                target.value += curr.value
+                target.merged_from.append(curr.coord)
+                curr.clear()
+                last_index += 1
+
+            # Is this current tile not empty? Then we might need to
+            # move its data to the next free tile.
+            elif curr.value != 0:
+
+                # If the current slot isn't free, then the next is
+                # for sure!
+                if target.value != 0:
+                    assert (last_index + 1) <= index
+                    last_index += 1
+                    target = tiles[last_index]
+
+                # No point in moving the tile to itself though!
+                if last_index != index:
+                    target.age = curr.age
+                    target.value = curr.value
+                    target.merged_from.append(curr.coord)
+                    curr.clear()
+
+            # Get to the next free tile if this ones already occupied.
+            elif target.value != 0:
+                last_index += 1
+
+            # If the value of the current tile dropped to zero, make
+            # sure to re-set its age to zero as well.
+            if curr.value == 0:
+                curr.age = 0
+
+        return score
 
 
 class TwentyFortyEight(object):
@@ -109,7 +200,7 @@ class TwentyFortyEight(object):
         }
 
         # Pre-define the directions in which you need to travel from
-        # an edge index to pass all cells in that row/column. The 2nd
+        # an edge index to pass all tiles in that row/column. The 2nd
         # element describes the grid size in that direction.
         self.directions = {
             self.MOVE_UP:    ((0,  1), grid_height),
@@ -123,9 +214,9 @@ class TwentyFortyEight(object):
         Resets the 2048 grid and randomly creates two initial tiles.
         """
 
-        # The grid is created in column-first order.
-        self.grid = [[0] * self.width for __ in xrange(self.height)]
         self.score = 0
+        self.grid = [[Tile(x, y) for y in xrange(self.height)]
+                                for x in xrange(self.width)]
         self.new_tile(count=2)
 
     def new_tile(self, count=1):
@@ -136,42 +227,40 @@ class TwentyFortyEight(object):
         initializes them with the value 2 or 4 with the probability of
         90% and 10%, respectively.
 
-        Returns True if the tiles were  created, False if there are
+        Returns True if the tiles were created, False if there are
         fewer than *count* empty tiles and no tiles have been
         initialized.
         """
 
         empty_tiles = []
-        for value, pos in self.iter_cells():
-            if value == 0:
-                empty_tiles.append(pos)
+        for tile in self.iter_tiles():
+            if tile.value == 0:
+                empty_tiles.append(tile)
 
         if len(empty_tiles) < count:
             return False
 
         for __ in xrange(count):
-            # Randomly choose an element and remove it from the list.
+            # Randomly choose an element and pop it from the list.
             index = random.randint(0, len(empty_tiles) - 1)
-            column, row = empty_tiles.pop(index)
-            self.grid[column][row] = 2 if random.random() <= 0.9 else 4
+            tile = empty_tiles.pop(index)
+            tile.value = 2 if random.random() <= 0.9 else 4
 
         return True
 
-    def iter_cells(self):
+    def iter_tiles(self):
         """
-        iter_cells() -> iterator of (value, (column, row))
+        iter_tiles() -> iterator of Tile
 
-        Use this function to iterate over all cells in the grid.
+        Use this function to iterate over all tiles in the grid.
         """
 
-        for column, tile_row in enumerate(self.grid):
-            for row, value in enumerate(tile_row):
-                yield value, (column, row)
+        for row in self.grid:
+            for tile in row:
+                yield tile
 
     def move(self, move):
         """
-        move(move) -> bool
-
         Performs a move on the game grid, updates the score and creates
         a new tile at a random location.
 
@@ -183,28 +272,57 @@ class TwentyFortyEight(object):
             - :data:`MOVE_RIGHT`
         """
 
-        has_2048 = False
         direction, steps = self.directions[move]
         for start_index in self.edges[move]:
 
-            # Get a list of the indices to traverse.
-            indices = list(traverse_grid(start_index, direction, steps))
+            # Get all tiles in a list and merge their values.
+            tiles = []
+            for col, row in traverse_grid(start_index, direction, steps):
+                tiles.append(self.grid[col][row])
 
-            # Now get a list of all the values in the grid cells
-            # of which we calculated the indices for.
-            values = (self.grid[column][row] for (column, row) in indices)
-
-            # Merge the values in 2048-style (it supports generators :-).
-            result = merge(values)
-
-            # Update the score and set the merged values back in the grid.
-            self.score += result[1]
-            for (column, row), value in zip(indices, result[0]):
-                if value == 2048:
-                    has_2048 = True
-                self.grid[column][row] = value
+            self.score += Tile.merge_tiles(tiles)
 
         self.new_tile()
+
+
+class AnimationGuide(object):
+    """
+    This is a helper class for percentage based animation with a fixed
+    duration. You pass in a time in seconds and it will let you
+    calculate how far the animation must have progressed at the time
+    you call :meth:`progress()`.
+
+    Use :meth:`reached` to check if the animation should by finished by
+    the time it is called.
+    """
+
+    def __init__(self, duration):
+        super(AnimationGuide, self).__init__()
+        self.start_time = time.time()
+        self.duration = duration
+
+    def reached(self):
+        """
+        reached() -> bool
+
+        Returns True if the animation goal was reached and the duration
+        was occupied, False if not.
+        """
+
+        passed = time.time() - self.start_time
+        return passed >= self.duration
+
+    def progress(self):
+        """
+        progress() -> float
+
+        Returns the progress of the animation as a floating point
+        number between zero and one. If called after the animation is
+        already completed, may return values larger than one.
+        """
+
+        passed = time.time() - self.start_time
+        return passed / self.duration
 
 
 class TFE_View(c4d.gui.GeUserArea):
@@ -212,11 +330,13 @@ class TFE_View(c4d.gui.GeUserArea):
     This class implements the visual representation of the 2048 grid.
     """
 
-    def __init__(self, game, tilesize=48, tilespace=8):
+    def __init__(self, game, tilesize=48, tilespace=8, animation_time=0.2):
         super(TFE_View, self).__init__()
         self.game = game
         self.tilesize = tilesize
         self.tilespace = tilespace
+        self.animation_time = animation_time
+        self.animation = None
 
     def get_color_vector(self, color_id):
         """
@@ -235,13 +355,94 @@ class TFE_View(c4d.gui.GeUserArea):
         """
         calc_tile_offset(index) -> integer
 
-        This is a helper function to compute the pixel offse of the
-        tile at *index*. This function works for both the horizontal
-        as well as the vertical offset as the tile size and spacing
-        are the same.
+        This is a helper function to compute the pixel offset of the
+        tile at *index*, excluding the initial left padding. This
+        function works for both the horizontal as well as the vertical
+        offset as the tile size and spacing are the same.
         """
 
-        return index * self.tilesize + (index + 1) * self.tilespace
+        return index * self.tilesize + index * self.tilespace
+
+    def perform_move(self, move):
+        """
+        Calls :meth:`TwentyFortyEight.move` and starts an animation
+        moving the tiles into the specified direction. This will
+        override any existing animation state.
+        """
+
+        self.animation = AnimationGuide(self.animation_time)
+        self.SetTimer(int(1.0 / 60.0 * 1000))
+        self.game.move(move)
+
+    def draw_tile(self, origin, coord, tween_coord, value, tile_age,
+            progress, color_low, color_high):
+        """
+        Helper function to draw a tile. If *value* is zero, an empty
+        tile will be drawn. The color of empty tiles is automatically
+        retrieved.
+
+        Will use the currently selected text color for the tile values.
+
+        :param origin: The upper-left corner of the game grid.
+        :param coord: The coordinate to render.
+        :param tween_coord: If specified, will be used as the tweening
+            coordinate for tile animation.
+        :param value: The value of the tile.
+        :param tile_age: The age of the tile, used to determine if the
+            tile just spawned and deserves a spawn animation.
+        :param progress: The animation progress, or None.
+        :param color_low: The low value color of the tile. This
+            parameter should be passed for performance reasons in
+            order to fetch it only once in DrawMsg().
+        :param color_high: The high value color of the tile. This
+            parameter should be passed for performance reasons in
+            order to fetch it only once in DrawMsg().
+        """
+
+        # Calculate the tile's position on the User Area for both
+        # components and convert it to a Coord object immediately.
+        pos = Coord(*map(self.calc_tile_offset, coord))
+
+        # Compute tile position based on animation progress and
+        # tween coordinate.
+        if progress is not None and tween_coord is not None:
+            source = Coord(*map(self.calc_tile_offset, tween_coord))
+            pos = Coord(
+                int(pos.x * progress + source.x * (1.0 - progress)),
+                int(pos.y * progress + source.y * (1.0 - progress)))
+
+        # Now it's time to make the coordinate absolute.
+        pos = Coord(origin.x + pos.x, origin.y + pos.y)
+
+        if value != 0:
+            # We use the logarithm to the base of 2 to convert the
+            # exponential scaling of tile values into a linear curve.
+            exponent = math.log(value, 2)
+            percent = exponent / 11.0
+            color = (1.0 - percent) * color_low + percent * color_high
+        else:
+            color = c4d.COLOR_BG
+
+        size = Coord(self.tilesize, self.tilesize)
+
+        # Let's add some nice growth effect to a newly spawned tile.
+        if progress is not None and value != 0 \
+                and tween_coord is None and tile_age == 0:
+            pos = Coord(
+                int(round(pos.x + (size.x / 2) * (1.0 - progress))),
+                int(round(pos.y + (size.x / 2) * (1.0 - progress))))
+            size = Coord(
+                int(round(size.x * progress)),
+                int(round(size.y * progress)))
+
+        self.DrawSetPen(color)
+        self.DrawRectangle(pos.x, pos.y, pos.x + size.x, pos.y + size.x)
+
+        if value != 0:
+            # Draw the value of the tile into its center.
+            flags = c4d.DRAWTEXT_HALIGN_CENTER | c4d.DRAWTEXT_VALIGN_CENTER
+            self.DrawText(
+                str(value), pos.x + size.x / 2, pos.y + size.y / 2, flags)
 
     def DrawMsg(self, x1, y1, x2, y2, msg):
         """
@@ -255,57 +456,69 @@ class TFE_View(c4d.gui.GeUserArea):
         self.DrawSetPen(c4d.COLOR_BGEDIT)
         self.DrawRectangle(x1, y1, x2, y2)
 
-        # Determine the vertical and horizontal margin of the
-        # grid view so we can center it.
-        size = self.GetMinSize()
-        xpos = (self.GetWidth() - size[0]) / 2
-        ypos = (self.GetHeight() - size[1]) / 2
-
         # The two colors for the tiles which we'll fade between.
-        color_low = self.get_color_vector(c4d.COLOR_BG)
+        color_low = self.get_color_vector(c4d.COLOR_TEXTFOCUS)
         color_high = self.get_color_vector(c4d.COLOR_SYNTAX_COMMENTWRONG)
 
         # Set the text color and font, we only need to do this once.
-        self.DrawSetTextCol(c4d.COLOR_TEXT, c4d.COLOR_TRANS)
+        self.DrawSetTextCol(c4d.COLOR_BGEDIT, c4d.COLOR_TRANS)
         self.DrawSetFont(c4d.FONT_BOLD)
 
-        # Render the tiles.
-        for value, pos in self.game.iter_cells():
-            # Don't forget, the game grid is indexed column-first.
-            xoff = xpos + self.calc_tile_offset(pos[0])
-            yoff = ypos + self.calc_tile_offset(pos[1])
+        # Determine the vertical and horizontal margin of the
+        # grid view so we can center it.
+        size = self.GetMinSize()
+        origin = Coord(
+            (self.GetWidth()  - size[0]) / 2 + self.tilespace,
+            (self.GetHeight() - size[1]) / 2 + self.tilespace)
 
-            # The color of the tile will be based on the value that is
-            # inside the tile which we will fade between two Cinema 4D
-            # color constants.
-            #
-            # We use the logarithm to determine the exponent of base two
-            # of the current value to result in a linear color fading.
-            # The maximum exponent value is 11 (2 ** 11 = 2048).
-            #
-            # Taking the empty cell in account, we need 12 grading steps.
-            if value != 0:
-                exponent = math.log(value, 2)
-                percent = (exponent + 1) / 12.0
-            else:
-                percent = 0.0
+        progress = None
+        if self.animation and self.animation.reached():
+            # If we had an animation in progress and if it is finished
+            # now, we erase it and disable the timer we used to redraw
+            # the view.
+            self.animation = None
+            self.SetTimer(0)
+        elif self.animation:
+            # If the animation is still in progress, retrieve this
+            # progress so we can use it to calculate the intermediate
+            # tile locations.
+            progress = self.animation.progress()
 
-            # Compute the color for the tile and draw it.
-            color = (1.0 - percent) * color_low + percent * color_high
-            self.DrawSetPen(color)
-            self.DrawRectangle(xoff, yoff, xoff + self.tilesize, yoff + self.tilesize)
 
-            # Now put the tile value in the middle.
-            if value != 0:
-                flags = c4d.DRAWTEXT_HALIGN_CENTER | c4d.DRAWTEXT_VALIGN_CENTER
-                self.DrawText(
-                    str(value), xoff + self.tilesize / 2,
-                    yoff + self.tilesize / 2, flags)
+        # Draw the background of all tiles.
+        for tile in self.game.iter_tiles():
+            self.draw_tile(
+                origin, tile.coord, None, 0, 0,
+                progress, color_low, color_high)
+
+        # Draw all the tiles.
+        for tile in self.game.iter_tiles():
+            # If the animation is in progress and the tile has original
+            # coordinates it has either been moved or merged.
+            if progress is not None and tile.merged_from:
+                prev_value = tile.value / 2 if tile.is_merged() else tile.value
+                for prev_coord in tile.merged_from:
+                    self.draw_tile(
+                        origin, tile.coord, prev_coord, prev_value, 0,
+                        progress, color_low, color_high)
+
+            # Otherwise, we only need to draw the tile if it has value
+            # since we drew the tile backgrounds already.
+            elif tile.value != 0:
+                self.draw_tile(
+                    origin, tile.coord, None, tile.value, tile.age,
+                    progress, color_low, color_high)
+
 
     def GetMinSize(self):
-        width = self.calc_tile_offset(self.game.width)
-        height = self.calc_tile_offset(self.game.height)
+        width = self.calc_tile_offset(self.game.width) + self.tilespace
+        height = self.calc_tile_offset(self.game.height) + self.tilespace
         return (width, height)
+
+    def Timer(self, msg):
+        # We use SetTimer() in perform_move() to periodically redraw
+        # the User Area in this method.
+        self.Redraw()
 
 
 class TFE_Dialog(c4d.gui.GeDialog):
@@ -334,14 +547,14 @@ class TFE_Dialog(c4d.gui.GeDialog):
         if msg.GetInt32(c4d.BFM_INPUT_DEVICE) == c4d.BFM_INPUT_KEYBOARD:
             channel = msg.GetInt32(c4d.BFM_INPUT_CHANNEL)
             handled = True
-            if channel == c4d.KEY_LEFT:
-                self.game.move(self.game.MOVE_LEFT)
-            elif channel == c4d.KEY_RIGHT:
-                self.game.move(self.game.MOVE_RIGHT)
-            elif channel == c4d.KEY_UP:
-                self.game.move(self.game.MOVE_UP)
+            if channel == c4d.KEY_UP:
+                self.view.perform_move(TwentyFortyEight.MOVE_UP)
             elif channel == c4d.KEY_DOWN:
-                self.game.move(self.game.MOVE_DOWN)
+                self.view.perform_move(TwentyFortyEight.MOVE_DOWN)
+            elif channel == c4d.KEY_LEFT:
+                self.view.perform_move(TwentyFortyEight.MOVE_LEFT)
+            elif channel == c4d.KEY_RIGHT:
+                self.view.perform_move(TwentyFortyEight.MOVE_RIGHT)
             elif channel == c4d.KEY_BACKSPACE:
                 self.game.reset()
             else:
