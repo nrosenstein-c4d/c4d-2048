@@ -33,7 +33,9 @@ import collections
 import math
 import random
 import time
+import unittest
 
+RUN_TESTS = True
 PLUGIN_ID = 1035109
 
 
@@ -631,5 +633,67 @@ class TFE_Command(c4d.plugins.CommandData):
         return self.dialog.Open(c4d.DLG_TYPE_ASYNC, PLUGIN_ID)
 
 
+# Unit Tests
+
+class TileMergeTest(unittest.TestCase):
+    """
+    Tests the merging result of cells.
+    """
+
+    # Test case input values and expected results.
+    cases = {
+        ( 0,  0,  0,  0): ( 0,  0,  0,  0),
+        ( 2,  0,  2,  0): ( 4,  0,  0,  0),
+        ( 2,  0,  0,  2): ( 4,  0,  0,  0),
+        ( 0,  2,  2,  0): ( 4,  0,  0,  0),
+        ( 2,  4,  0,  4): ( 2,  8,  0,  0),
+        (16,  8,  8,  0): (16, 16,  0,  0),
+        ( 4, 16,  0, 16): ( 4, 32,  0,  0),
+        (32, 16,  8,  2): (32, 16,  8,  2),
+    }
+
+    def test_merge(self):
+        for input_values, output_values in self.cases.iteritems():
+            tiles = [Tile(0, i, x) for i, x in enumerate(input_values)]
+            Tile.merge_tiles(tiles)
+            values = tuple(t.value for t in tiles)
+            self.assertEquals(output_values, values)
+
+
+def get_test_suite():
+    """
+    Searches for subclasses of the :class:`unittest.TestCase` class
+    in all global variables and adds them to a TestSuite with all
+    their test methods.
+    """
+
+    suite = unittest.TestSuite()
+    for value in globals().values():
+        # We can only check with issubclass() if the value is a
+        # type object.
+        if not isinstance(value, type):
+            continue
+
+        # Is the type a TestCase subclass? Well then
+        if not issubclass(value, unittest.TestCase):
+            continue
+
+        # Create a TestCase for all its methods that start with
+        # the word "test" and add them to the suite.
+        for name in dir(value):
+            if name.startswith('test'):
+                suite.addTest(value(name))
+
+    return suite
+
+
 if __name__ == "__main__":
+    if RUN_TESTS:
+        print "Running Unit Tests for 2048 ..."
+        suite = get_test_suite()
+        runner = unittest.TextTestRunner()
+        runner.run(suite)
+
+    # Register the Plugin Command.
     TFE_Command().register()
+    print "2048 registered. Visit http://niklasrosenstein.com/"
