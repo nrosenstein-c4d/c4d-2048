@@ -159,10 +159,6 @@ class Tile(object):
                     target.merged_from.append(curr.coord)
                     curr.clear()
 
-            # Get to the next free tile if this ones already occupied.
-            elif target.value != 0:
-                last_index += 1
-
             # If the value of the current tile dropped to zero, make
             # sure to re-set its age to zero as well.
             if curr.value == 0:
