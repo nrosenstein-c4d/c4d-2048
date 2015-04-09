@@ -39,6 +39,8 @@ RUN_TESTS = True
 PLUGIN_ID = 1035109
 
 
+# Game Logic
+
 def traverse_grid(start_index, direction, steps):
     """
     traverse_grid(start_index, direction, steps) -> iterator of (x, y)
@@ -70,9 +72,12 @@ class Tile(object):
 
         The value of the tile. Zero indicates an empty tile.
 
-    .. attribute:: prev_value
+    .. attribute:: age
 
-        The previous value of the tile.
+        The age of the tile, that is the number of moves since
+        that have passed since the tile was created. The age
+        moves with the tile value. If two tiles are merged, the
+        older tile's age is transferred.
 
     .. attribute:: merged_from
 
@@ -115,16 +120,18 @@ class Tile(object):
     @staticmethod
     def merge_tiles(tiles):
         """
-        merge_tiles(tiles) -> integer
+        merge_tiles(tiles) -> (integer, bool)
 
         Merges all :class:`Tile`s in the list *tiles*. The actual Tile
         objects stay at the same position in the grid, only their
         attributes will be adjusted.
 
-        Returns the score achieved by the merge.
+        Returns the score achieved by the merge and whether tiles have
+        been moved to a different location.
         """
 
         score = 0
+        tiles_moved = False
         last_index = 0
 
         for index, curr in enumerate(tiles):
@@ -135,9 +142,19 @@ class Tile(object):
 
             target = tiles[last_index]
 
-            # Check if we can merge this tile into its predecesor.
             if curr.value != 0 and target.value == curr.value:
+                # Merge this tile into its predecessor and update the
+                # score. We also append its original location to the
+                # merged_from list so we know where it came from.
+
+                if not target.merged_from:
+                    # If the target cell has not been moved from another
+                    # location, it's still important to know it was
+                    # merged from its original location.
+                    target.merged_from.append(target.coord)
+
                 score += curr.value * 2
+                target.age = max([target.age, curr.age])
                 target.value += curr.value
                 target.merged_from.append(curr.coord)
                 curr.clear()
@@ -146,27 +163,34 @@ class Tile(object):
             # Is this current tile not empty? Then we might need to
             # move its data to the next free tile.
             elif curr.value != 0:
+                # If the current tile is not empty, we move it to
+                # the next empty tile so all non-empty tiles will
+                # appear consecutively after this function.
 
-                # If the current slot isn't free, then the next is
-                # for sure!
                 if target.value != 0:
+                    # If the current target tile is not empty, the
+                    # next tile is or is the same tile as the current.
                     assert (last_index + 1) <= index
                     last_index += 1
                     target = tiles[last_index]
 
-                # No point in moving the tile to itself though!
                 if last_index != index:
+                    # There's no sense in moving the current tile to
+                    # itself, and it would result in a logic error as
+                    # after moving, we clear the current tile.
+
                     target.age = curr.age
                     target.value = curr.value
                     target.merged_from.append(curr.coord)
                     curr.clear()
+                    tiles_moved = True
 
             # If the value of the current tile dropped to zero, make
             # sure to re-set its age to zero as well.
             if curr.value == 0:
                 curr.age = 0
 
-        return score
+        return score, tiles_moved
 
 
 class TwentyFortyEight(object):
@@ -260,7 +284,7 @@ class TwentyFortyEight(object):
     def move(self, move):
         """
         Performs a move on the game grid, updates the score and creates
-        a new tile at a random location.
+        a new tile at a random location if tiles have been moved.
 
         :param move: Must be one of the following values:
 
@@ -270,6 +294,7 @@ class TwentyFortyEight(object):
             - :data:`MOVE_RIGHT`
         """
 
+        tiles_moved = False
         direction, steps = self.directions[move]
         for start_index in self.edges[move]:
 
@@ -278,9 +303,12 @@ class TwentyFortyEight(object):
             for col, row in traverse_grid(start_index, direction, steps):
                 tiles.append(self.grid[col][row])
 
-            self.score += Tile.merge_tiles(tiles)
+            result = Tile.merge_tiles(tiles)
+            self.score += result[0]
+            tiles_moved = tiles_moved or result[1]
 
-        self.new_tile()
+        if tiles_moved:
+            self.new_tile()
 
 
 class AnimationGuide(object):
@@ -322,6 +350,8 @@ class AnimationGuide(object):
         passed = time.time() - self.start_time
         return passed / self.duration
 
+
+# Cinema 4D GUI
 
 class TFE_View(c4d.gui.GeUserArea):
     """
