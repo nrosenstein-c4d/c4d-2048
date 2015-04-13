@@ -159,6 +159,7 @@ class Tile(object):
                 target.merged_from.append(curr.coord)
                 curr.clear()
                 last_index += 1
+                tiles_moved = True
 
             # Is this current tile not empty? Then we might need to
             # move its data to the next free tile.
